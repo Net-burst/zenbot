@@ -1,17 +1,17 @@
 var z = require('zero-fill')
   , n = require('numbro')
   , rsi = require('../../../lib/rsi')
-  , ta_trix = require('../../../lib/ta_trix')
+  , ti_hma = require('../../../lib/ti_hma')
   , Phenotypes = require('../../../lib/phenotype')
 
 module.exports = {
-  name: 'ta_trix',
-  description: 'TRIX - 1-day Rate-Of-Change (ROC) of a Triple Smooth EMA with rsi oversold',
+  name: 'ti_hma',
+  description: 'HMA - Hull Moving Average',
 
   getOptions: function () {
-    this.option('period', 'period length eg 10m', String, '5m')
+    this.option('period', 'period length eg 10m', String, '15m')
     this.option('min_periods', 'min. number of history periods', Number, 52)
-    this.option('timeperiod', 'timeperiod for TRIX', Number, 30)
+    this.option('trend_hma', 'number of periods for trend hma', Number, 36)
     this.option('overbought_rsi_periods', 'number of periods for overbought RSI', Number, 25)
     this.option('overbought_rsi', 'sold when RSI exceeds this value', Number, 70)
   },
@@ -40,25 +40,25 @@ module.exports = {
       }
     }
 
-    ta_trix(s, s.options.timeperiod).then(function(signal) {
-      s.period['trix'] = signal
+    ti_hma(s, s.options.min_periods, s.options.trend_hma).then(function(signal) {
+      s.period['trend_hma'] = signal
 
-      if (s.period.trix && s.lookback[0] && s.lookback[0].trix) {
-        s.period.trend_trix = s.period.trix >= 0 ? 'up' : 'down'
+      // percentage change
+      if (s.period.trend_hma && s.lookback[0] && s.lookback[0].trend_hma) {
+        s.period.trend_hma_rate = (s.period.trend_hma - s.lookback[0].trend_hma) / s.lookback[0].trend_hma * 100
       }
 
-      if (s.period.trend_trix == 'up') {
+      if (s.period.trend_hma_rate > 0) {
         if (s.trend !== 'up') {
           s.acted_on_trend = false
         }
-
         s.trend = 'up'
         s.signal = !s.acted_on_trend ? 'buy' : null
-      } else if (s.period.trend_trix == 'down') {
+        s.cancel_down = false
+      } else if (!s.cancel_down && s.period.trend_hma_rate < 0) {
         if (s.trend !== 'down') {
           s.acted_on_trend = false
         }
-
         s.trend = 'down'
         s.signal = !s.acted_on_trend ? 'sell' : null
       }
@@ -71,20 +71,27 @@ module.exports = {
   },
 
   onReport: function (s) {
-    let cols = []
+    var cols = []
 
-    if (typeof s.period.trix === 'number') {
-      let color = s.period.trix > 0 ? 'green' : 'red'
+    if (typeof s.period.trend_hma === 'number') {
+      var color = 'grey'
 
-      cols.push(z(8, n(s.period.trix).format('0.0000'), ' ')[color])
+      if (s.period.trend_hma_rate > 0) {
+        color = 'green'
+      } else if (s.period.trend_hma_rate < 0) {
+        color = 'red'
+      }
+
+      cols.push(z(8, n(s.period.trend_hma).format('0.0000'), ' ')[color])
+      cols.push(z(6, n(s.period.trend_hma_rate).format('0.00'), ' ')[color])
     }
 
     return cols
   },
 
   phenotypes: {
-    period_length: Phenotypes.RangePeriod(1, 120, 'm'),
-    min_periods: Phenotypes.Range(1, 104),
+    period_length: Phenotypes.RangePeriod(5, 120, 'm'),
+    min_periods: Phenotypes.Range(20, 104),
     markdown_buy_pct: Phenotypes.RangeFloat(-1, 5),
     markup_sell_pct: Phenotypes.RangeFloat(-1, 5),
     order_type: Phenotypes.ListOption(['maker', 'taker']),
@@ -93,7 +100,7 @@ module.exports = {
     profit_stop_enable_pct: Phenotypes.Range0(1, 20),
     profit_stop_pct: Phenotypes.Range(1,20),
 
-    timeperiod: Phenotypes.Range(1,60),
+    trend_hma: Phenotypes.Range(6, 72),
     overbought_rsi_periods: Phenotypes.Range(1, 50),
     overbought_rsi: Phenotypes.Range(20, 100)
   }
